@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+cognios/cognios.db
+cognios/cognios.db-wal
+cognios/cognios.db-shm
+metrics_dump.csv
+test_export.csv
+*.csv
