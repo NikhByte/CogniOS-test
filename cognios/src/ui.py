@@ -20,6 +20,11 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Auto-refresh sidebar controls
+st.sidebar.markdown("### ⚙️ Dashboard Controls")
+enable_refresh = st.sidebar.checkbox("Enable Auto-Refresh 🔄", value=True)
+refresh_rate = st.sidebar.slider("Refresh Interval (seconds) ⏱️", min_value=1, max_value=10, value=2)
+
 # Custom Premium CSS for styling and dark mode
 st.markdown("""
 <style>
@@ -322,3 +327,8 @@ with tab_research:
         > **Shortest Job First (SJF)** represents the mathematical lower bound for average wait time when processes arrive concurrently. 
         > The **Stable-Baselines3 RL agent** learns process burst structures and dynamically optimizes sequence sorting to match or exceed static heuristic bounds on varying workloads.
         """)
+
+# Auto-refresh loop execution at the bottom of page rendering
+if enable_refresh:
+    time.sleep(refresh_rate)
+    st.rerun()
