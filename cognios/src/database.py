@@ -48,20 +48,30 @@ def init_db():
         )
     """)
     
+    # Ensure columns exist in system_metrics for GPU telemetry
+    cursor.execute("PRAGMA table_info(system_metrics)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if 'gpu_util' not in columns:
+        cursor.execute("ALTER TABLE system_metrics ADD COLUMN gpu_util REAL DEFAULT 0.0")
+        logger.info("Added gpu_util column to system_metrics database table.")
+    if 'gpu_mem' not in columns:
+        cursor.execute("ALTER TABLE system_metrics ADD COLUMN gpu_mem REAL DEFAULT 0.0")
+        logger.info("Added gpu_mem column to system_metrics database table.")
+        
     conn.commit()
     conn.close()
     logger.info("Database initialized successfully at %s", DB_PATH)
 
-def insert_system_metrics(ts, cpu, ram, disk):
+def insert_system_metrics(ts, cpu, ram, disk, gpu_util=0.0, gpu_mem=0.0):
     """
-    Insert a single row of system metrics.
+    Insert a single row of system metrics including GPU metrics.
     """
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO system_metrics (ts, cpu, ram, disk) VALUES (?, ?, ?, ?)",
-            (ts, cpu, ram, disk)
+            "INSERT INTO system_metrics (ts, cpu, ram, disk, gpu_util, gpu_mem) VALUES (?, ?, ?, ?, ?, ?)",
+            (ts, cpu, ram, disk, gpu_util, gpu_mem)
         )
         conn.commit()
     except Exception as e:
@@ -97,7 +107,7 @@ def get_last_system_metrics(limit=100):
     try:
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT ts, cpu, ram, disk FROM system_metrics ORDER BY ts DESC LIMIT ?",
+            "SELECT ts, cpu, ram, disk, gpu_util, gpu_mem FROM system_metrics ORDER BY ts DESC LIMIT ?",
             (limit,)
         )
         rows = cursor.fetchall()

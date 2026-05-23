@@ -18,6 +18,9 @@ class TelemetryCollector:
         self.mock_disk = 45.34
         self.mock_state = 'idle'  # 'idle' or 'spike'
         self.mock_state_ticks = 0
+        
+        # Process cache for correct CPU percent calculations
+        self.process_cache = {}
 
     def _update_mock_state(self):
         """
@@ -37,10 +40,31 @@ class TelemetryCollector:
                 self.mock_state = 'idle'
                 self.mock_state_ticks = 0
 
+    def _collect_gpu_metrics(self):
+        """
+        Collect real GPU utilization and memory metrics via nvidia-smi.
+        Returns a tuple: (gpu_util, gpu_mem)
+        """
+        try:
+            import subprocess
+            cmd = ["nvidia-smi", "--query-gpu=utilization.gpu,memory.used", "--format=csv,noheader,nounits"]
+            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=1.0)
+            if result.returncode == 0:
+                parts = result.stdout.strip().split(',')
+                if len(parts) >= 2:
+                    gpu_util = float(parts[0].strip())
+                    gpu_mem = float(parts[1].strip())
+                    return gpu_util, gpu_mem
+        except Exception as e:
+            logger.debug("Failed to collect GPU metrics from nvidia-smi: %s", e)
+        
+        # Safe default fallback
+        return 0.0, 0.0
+
     def collect_system_metrics(self):
         """
-        Collect system-wide CPU, RAM, and Disk metrics.
-        Returns a tuple: (ts, cpu, ram, disk)
+        Collect system-wide CPU, RAM, Disk, and GPU metrics.
+        Returns a tuple: (ts, cpu, ram, disk, gpu_util, gpu_mem)
         """
         ts = time.time()
         
@@ -72,26 +96,39 @@ class TelemetryCollector:
             self.mock_disk += random.uniform(-0.002, 0.005)
             self.mock_disk = max(10.0, min(95.0, self.mock_disk))
             
-            return ts, round(self.mock_cpu, 2), round(self.mock_ram, 2), round(self.mock_disk, 2)
+            # Simulate GPU
+            if self.mock_state == 'spike':
+                gpu_util = round(random.uniform(50.0, 85.0), 2)
+                gpu_mem = round(random.uniform(1500.0, 3000.0), 2)
+            else:
+                gpu_util = round(random.uniform(5.0, 20.0), 2)
+                gpu_mem = round(random.uniform(400.0, 800.0), 2)
+            
+            return ts, round(self.mock_cpu, 2), round(self.mock_ram, 2), round(self.mock_disk, 2), gpu_util, gpu_mem
 
         try:
-            cpu = psutil.cpu_percent(interval=None)
+            cpu = psutil.cpu_percent(interval=0.1)
             ram = psutil.virtual_memory().percent
             disk = psutil.disk_usage('/').percent
-            return ts, cpu, ram, disk
+            gpu_util, gpu_mem = self._collect_gpu_metrics()
+            return ts, cpu, ram, disk, gpu_util, gpu_mem
         except Exception as e:
             logger.warning("Error reading real system metrics, falling back to stateful mock: %s", e)
             # Safe stateful fallback
             if self.mock_state == 'idle':
                 self.mock_cpu += (random.uniform(8.0, 18.0) - self.mock_cpu) * 0.15 + random.uniform(-1.0, 1.0)
                 self.mock_ram -= random.uniform(0.05, 0.2)
+                gpu_util = round(random.uniform(5.0, 20.0), 2)
+                gpu_mem = round(random.uniform(400.0, 800.0), 2)
             else:
                 self.mock_cpu += (random.uniform(78.0, 92.0) - self.mock_cpu) * 0.35 + random.uniform(-2.0, 2.0)
                 self.mock_ram += random.uniform(0.1, 0.4)
+                gpu_util = round(random.uniform(50.0, 85.0), 2)
+                gpu_mem = round(random.uniform(1500.0, 3000.0), 2)
             self.mock_cpu = max(5.0, min(98.0, self.mock_cpu))
             self.mock_ram = max(30.0, min(85.0, self.mock_ram))
             self.mock_disk += random.uniform(-0.002, 0.005)
-            return ts, round(self.mock_cpu, 2), round(self.mock_ram, 2), round(self.mock_disk, 2)
+            return ts, round(self.mock_cpu, 2), round(self.mock_ram, 2), round(self.mock_disk, 2), gpu_util, gpu_mem
 
     def collect_process_metrics(self):
         """
@@ -121,17 +158,30 @@ class TelemetryCollector:
 
         processes_data = []
         try:
-            # Iterate through processes
-            for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent']):
+            # Iterate through processes using a persistent cache to maintain history for cpu_percent
+            current_pids = set()
+            for proc in psutil.process_iter(['pid', 'name']):
                 try:
-                    info = proc.info
-                    pid = info['pid']
-                    name = info['name'] or "Unknown"
-                    cpu = info['cpu_percent'] or 0.0
-                    ram = info['memory_percent'] or 0.0
+                    pid = proc.info['pid']
+                    name = proc.info['name'] or "Unknown"
+                    current_pids.add(pid)
+                    
+                    if pid in self.process_cache:
+                        p_obj = self.process_cache[pid]
+                    else:
+                        p_obj = proc
+                        self.process_cache[pid] = p_obj
+                        # Seed first cpu_percent check
+                        p_obj.cpu_percent(interval=None)
+                        
+                    cpu = p_obj.cpu_percent(interval=None)
+                    ram = p_obj.memory_percent()
                     processes_data.append((ts, pid, name, cpu, ram))
                 except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                     continue
+
+            # Clean stale processes from cache
+            self.process_cache = {p: obj for p, obj in self.process_cache.items() if p in current_pids}
 
             # Sort by CPU + RAM and return top 15 processes
             processes_data.sort(key=lambda x: x[3] + x[4], reverse=True)
@@ -147,8 +197,8 @@ class TelemetryCollector:
         """
         Perform a single collection and insertion step.
         """
-        ts, cpu, ram, disk = self.collect_system_metrics()
-        insert_system_metrics(ts, cpu, ram, disk)
+        ts, cpu, ram, disk, gpu_util, gpu_mem = self.collect_system_metrics()
+        insert_system_metrics(ts, cpu, ram, disk, gpu_util, gpu_mem)
         
         proc_metrics = self.collect_process_metrics()
         insert_process_metrics(proc_metrics)

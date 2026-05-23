@@ -37,11 +37,16 @@ def test_telemetry():
     assert len(proc_metrics) > 0, "Process metrics table should contain records"
     
     # Check data fields
-    ts, cpu, ram, disk = sys_metrics[0]
+    metrics_row = sys_metrics[0]
+    ts, cpu, ram, disk = metrics_row[:4]
     assert isinstance(ts, float)
     assert isinstance(cpu, float)
     assert isinstance(ram, float)
     assert isinstance(disk, float)
+    if len(metrics_row) == 6:
+        gpu_util, gpu_mem = metrics_row[4:]
+        assert isinstance(gpu_util, float)
+        assert isinstance(gpu_mem, float)
     
     p_ts, pid, name, p_cpu, p_ram = proc_metrics[0]
     assert isinstance(p_ts, float)
@@ -51,7 +56,7 @@ def test_telemetry():
     assert isinstance(p_ram, float)
     
     print(f"\n[Telemetry Test] System Metrics Count: {len(sys_metrics)}, Process Metrics Count: {len(proc_metrics)}")
-
+ 
 def test_os_doctor():
     # Initialize the database
     init_db()
@@ -66,7 +71,7 @@ def test_os_doctor():
     cursor.execute("DELETE FROM system_metrics")
     conn.commit()
     conn.close()
-
+ 
     # Inject fake baseline data (normal load)
     # 100 uniform random samples to create a robust model
     import random
@@ -77,24 +82,26 @@ def test_os_doctor():
         cpu = random.uniform(15.0, 25.0)
         ram = random.uniform(40.0, 45.0)
         disk = random.uniform(45.0, 48.0)
-        insert_system_metrics(ts, cpu, ram, disk)
+        gpu_util = random.uniform(5.0, 15.0)
+        gpu_mem = random.uniform(500.0, 800.0)
+        insert_system_metrics(ts, cpu, ram, disk, gpu_util, gpu_mem)
         
     # Instantiate OSDoctor and train it
     doctor = OSDoctor(contamination='auto', random_state=42)
     doctor.train()
     
     # Infer on a normal point (should be 1)
-    normal_row = (time.time(), 20.0, 43.0, 46.0)
+    normal_row = (time.time(), 20.0, 43.0, 46.0, 10.0, 600.0)
     normal_pred = doctor.infer(normal_row)
     assert normal_pred == 1, f"Normal point should be classified as 1, got {normal_pred}"
     
     # Infer on a spike point (CPU = 100) (should be -1)
-    spike_row = (time.time(), 100.0, 43.0, 46.0)
+    spike_row = (time.time(), 100.0, 43.0, 46.0, 95.0, 3000.0)
     spike_pred = doctor.infer(spike_row)
     assert spike_pred == -1, f"Spike point should be classified as -1 (anomaly), got {spike_pred}"
     
     print("\n[OS Doctor Test] Successfully detected CPU spike anomaly!")
-
+ 
 def test_focus_os():
     import torch
     import os
@@ -122,7 +129,7 @@ def test_focus_os():
     assert mock_success is True, "Mock Prioritizer should succeed for negative nice values"
     
     print("\n[FocusOS Test] CNN forward pass and Prioritizer checks passed successfully!")
-
+ 
 def test_blackbox():
     import os
     import time
@@ -144,8 +151,8 @@ def test_blackbox():
     old_ts = now - 36 * 3600  # 36 hours ago
     new_ts = now - 1 * 60     # 1 minute ago
     
-    insert_system_metrics(old_ts, 20.0, 45.0, 50.0)
-    insert_system_metrics(new_ts, 30.0, 48.0, 52.0)
+    insert_system_metrics(old_ts, 20.0, 45.0, 50.0, 5.0, 400.0)
+    insert_system_metrics(new_ts, 30.0, 48.0, 52.0, 10.0, 600.0)
     
     # Verify both exist
     metrics_before = get_last_system_metrics(limit=10)

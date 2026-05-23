@@ -11,7 +11,7 @@ class OSDoctor:
         self.contamination = contamination
         self.random_state = random_state
         self.model = None
-        self.features = ['cpu', 'ram', 'disk']
+        self.features = ['cpu', 'ram', 'disk', 'gpu_util']
 
     def train(self):
         """
@@ -25,12 +25,18 @@ class OSDoctor:
             data = {
                 'cpu': np.random.uniform(10.0, 30.0, size=50),
                 'ram': np.random.uniform(30.0, 50.0, size=50),
-                'disk': np.random.uniform(40.0, 45.0, size=50)
+                'disk': np.random.uniform(40.0, 45.0, size=50),
+                'gpu_util': np.random.uniform(5.0, 15.0, size=50)
             }
             df = pd.DataFrame(data)
         else:
-            # Columns: ts, cpu, ram, disk
-            df = pd.DataFrame(rows, columns=['ts', 'cpu', 'ram', 'disk'])
+            # Columns: ts, cpu, ram, disk, gpu_util, gpu_mem
+            if len(rows[0]) == 4:
+                df = pd.DataFrame(rows, columns=['ts', 'cpu', 'ram', 'disk'])
+                df['gpu_util'] = 0.0
+                df['gpu_mem'] = 0.0
+            else:
+                df = pd.DataFrame(rows, columns=['ts', 'cpu', 'ram', 'disk', 'gpu_util', 'gpu_mem'])
         
         self.model = IsolationForest(
             contamination=self.contamination,
@@ -42,7 +48,7 @@ class OSDoctor:
 
     def infer(self, latest_row):
         """
-        Takes the latest DB row: (ts, cpu, ram, disk) or dict
+        Takes the latest DB row: (ts, cpu, ram, disk, gpu_util, gpu_mem) or dict
         Returns 1 if normal, -1 if anomaly.
         """
         if self.model is None:
@@ -53,15 +59,19 @@ class OSDoctor:
             cpu = latest_row.get('cpu', 0.0)
             ram = latest_row.get('ram', 0.0)
             disk = latest_row.get('disk', 0.0)
+            gpu_util = latest_row.get('gpu_util', 0.0)
         elif isinstance(latest_row, (list, tuple)):
-            # If length is 4: (ts, cpu, ram, disk)
-            if len(latest_row) == 4:
+            if len(latest_row) == 6:
+                _, cpu, ram, disk, gpu_util, _ = latest_row
+            elif len(latest_row) == 4:
                 _, cpu, ram, disk = latest_row
+                gpu_util = 0.0
             else:
-                cpu, ram, disk = latest_row
+                cpu, ram, disk = latest_row[:3]
+                gpu_util = 0.0
         else:
             raise ValueError("latest_row must be a dict, list, or tuple")
 
-        X = pd.DataFrame([[cpu, ram, disk]], columns=self.features)
+        X = pd.DataFrame([[cpu, ram, disk, gpu_util]], columns=self.features)
         pred = self.model.predict(X)
         return int(pred[0])

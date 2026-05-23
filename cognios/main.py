@@ -24,8 +24,9 @@ def run_telemetry():
     Run the telemetry collection loop in a daemon thread.
     """
     init_db()
-    # We use use_mock=True by default to ensure perfect stability in sandboxed environments
-    collector = TelemetryCollector(interval=1.0, use_mock=True)
+    # Set use_mock=False by default to collect real-time system and GPU metrics (matching htop).
+    # TelemetryCollector will automatically fall back to realistic stateful mock data if drivers fail.
+    collector = TelemetryCollector(interval=1.0, use_mock=False)
     collector.start_loop()
 
 def run_doctor():

@@ -3,6 +3,7 @@ import pandas as pd
 import time
 import os
 import sys
+import psutil
 
 # Ensure cognios is in import path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
@@ -144,14 +145,25 @@ with tab_telemetry:
     sys_metrics = get_last_system_metrics(limit=60)
     proc_metrics = get_last_process_metrics(limit=15)
     
+    # Check GPU availability
+    import torch
+    gpu_available = torch.cuda.is_available()
+    gpu_name = torch.cuda.get_device_name(0) if gpu_available else "No GPU Detected"
+    
     if sys_metrics:
-        df_sys = pd.DataFrame(sys_metrics, columns=['ts', 'cpu', 'ram', 'disk'])
+        if len(sys_metrics[0]) == 6:
+            df_sys = pd.DataFrame(sys_metrics, columns=['ts', 'cpu', 'ram', 'disk', 'gpu_util', 'gpu_mem'])
+        else:
+            df_sys = pd.DataFrame(sys_metrics, columns=['ts', 'cpu', 'ram', 'disk'])
+            df_sys['gpu_util'] = 0.0
+            df_sys['gpu_mem'] = 0.0
+            
         df_sys['time'] = df_sys['ts'].apply(lambda x: time.strftime('%H:%M:%S', time.localtime(x)))
         
         # Display main metric cards
         latest = df_sys.iloc[-1]
         
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.markdown(f"""
             <div class="metric-card">
@@ -162,11 +174,18 @@ with tab_telemetry:
         with col2:
             st.markdown(f"""
             <div class="metric-card">
+                <div class="metric-label">GPU Utilization</div>
+                <div class="metric-value" style="color: #10b981;">{latest['gpu_util']}%</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with col3:
+            st.markdown(f"""
+            <div class="metric-card">
                 <div class="metric-label">Memory Allocation</div>
                 <div class="metric-value" style="color: #ec4899;">{latest['ram']}%</div>
             </div>
             """, unsafe_allow_html=True)
-        with col3:
+        with col4:
             st.markdown(f"""
             <div class="metric-card">
                 <div class="metric-label">Disk Storage Capacity</div>
@@ -175,12 +194,50 @@ with tab_telemetry:
             """, unsafe_allow_html=True)
             
         st.write("")
+        
+        # Display GPU active card metadata banner if telemetry is present
+        if len(sys_metrics[0]) == 6 and gpu_available:
+            st.markdown(f"""
+            <div style="background: rgba(16, 185, 129, 0.1); padding: 1.2rem; border-radius: 12px; border: 1px solid rgba(16, 185, 129, 0.2); margin-top: 1rem; margin-bottom: 1.5rem;">
+                <span style="color: #10b981; font-weight: bold; font-size: 1.1rem;">🎮 NVIDIA GPU Accelerated Subsystem</span><br/>
+                <span style="color: #e2e8f0; font-size: 0.95rem;"><strong>Active Graphics Adapter:</strong> {gpu_name}</span><br/>
+                <span style="color: #94a3b8; font-size: 0.9rem;"><strong>Volatile GPU VRAM Allocation:</strong> {latest['gpu_mem']} MiB</span>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        st.write("")
+        
+        # logical CPU Cores HUD Grid (htop style)
+        st.markdown("### 🎛️ Logical CPU Cores HUD")
+        per_cpu_usages = psutil.cpu_percent(interval=None, percpu=True)
+        num_cores = len(per_cpu_usages)
+        
+        # 4 columns per row for a beautiful layout
+        cols_per_row = 4
+        num_rows = (num_cores + cols_per_row - 1) // cols_per_row
+        
+        for r in range(num_rows):
+            cols = st.columns(cols_per_row)
+            for c in range(cols_per_row):
+                idx = r * cols_per_row + c
+                if idx < num_cores:
+                    with cols[c]:
+                        st.markdown(f"""
+                        <div style="background: rgba(22, 28, 41, 0.4); padding: 0.5rem 0.8rem; border-radius: 10px; border: 1px solid rgba(255,255,255,0.03); margin-bottom: 0.5rem;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.2rem;">
+                                <span style="font-size: 0.75rem; color: #94a3b8; font-weight: 600;">Core {idx + 1}</span>
+                                <span style="font-size: 0.85rem; color: #818cf8; font-weight: bold;">{per_cpu_usages[idx]}%</span>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        st.progress(per_cpu_usages[idx] / 100.0)
+                        
         st.write("")
         
         # Performance Charts
         st.subheader("Usage Trends")
-        chart_df = df_sys.set_index('time')[['cpu', 'ram']]
-        st.line_chart(chart_df, color=["#818cf8", "#ec4899"])
+        chart_df = df_sys.set_index('time')[['cpu', 'gpu_util', 'ram']]
+        st.line_chart(chart_df, color=["#818cf8", "#10b981", "#ec4899"])
     else:
         st.info("No system metrics collected yet. Please ensure the telemetry collector daemon is running.")
 
@@ -241,14 +298,17 @@ with tab_doctor:
         col1, col2 = st.columns(2)
         with col1:
             st.metric("Latest Sampled CPU", f"{latest_row[1]}%")
+            if len(latest_row) == 6:
+                st.metric("Latest Sampled GPU", f"{latest_row[4]}%")
             st.metric("Latest Sampled RAM", f"{latest_row[2]}%")
             st.metric("Latest Sampled Disk", f"{latest_row[3]}%")
         with col2:
-            st.markdown("""
+            features_list = "['cpu', 'ram', 'disk', 'gpu_util']" if len(latest_row) == 6 else "['cpu', 'ram', 'disk']"
+            st.markdown(f"""
             An **Isolation Forest** model isolates anomalies by randomly partitioning feature spaces.
             Anomalous workloads require fewer splits to isolate, resulting in shorter paths in the decision trees.
             - **Status**: Active
-            - **Features Tracked**: `['cpu', 'ram', 'disk']`
+            - **Features Tracked**: `{features_list}`
             - **Diagnosis Interval**: Real-time
             """)
     else:

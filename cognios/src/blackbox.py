@@ -32,7 +32,12 @@ def export_to_csv(filepath, duration_minutes=5):
     cutoff = time.time() - duration_minutes * 60
     conn = get_db_connection()
     try:
-        query = "SELECT ts, cpu, ram, disk FROM system_metrics WHERE ts >= ? ORDER BY ts ASC"
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(system_metrics)")
+        cols = [col[1] for col in cursor.fetchall()]
+        col_str = ", ".join(cols)
+        
+        query = f"SELECT {col_str} FROM system_metrics WHERE ts >= ? ORDER BY ts ASC"
         df = pd.read_sql_query(query, conn, params=(cutoff,))
         
         # Make sure directory exists
