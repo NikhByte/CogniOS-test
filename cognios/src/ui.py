@@ -146,7 +146,7 @@ with tab_telemetry:
     
     if sys_metrics:
         df_sys = pd.DataFrame(sys_metrics, columns=['ts', 'cpu', 'ram', 'disk'])
-        df_sys['time'] = pd.to_datetime(df_sys['ts'], unit='s').dt.strftime('%H:%M:%S')
+        df_sys['time'] = df_sys['ts'].apply(lambda x: time.strftime('%H:%M:%S', time.localtime(x)))
         
         # Display main metric cards
         latest = df_sys.iloc[-1]
