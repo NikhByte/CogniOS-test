@@ -1,6 +1,5 @@
 psutil
 pandas
 scikit-learn
-torch
 streamlit
 pytest

@@ -146,9 +146,16 @@ with tab_telemetry:
     proc_metrics = get_last_process_metrics(limit=15)
     
     # Check GPU availability
-    import torch
-    gpu_available = torch.cuda.is_available()
-    gpu_name = torch.cuda.get_device_name(0) if gpu_available else "No GPU Detected"
+    import subprocess
+    gpu_available = False
+    gpu_name = "No GPU Detected"
+    try:
+        result = subprocess.run(['nvidia-smi', '--query-gpu=name', '--format=csv,noheader'], capture_output=True, text=True)
+        if result.returncode == 0 and result.stdout.strip():
+            gpu_available = True
+            gpu_name = result.stdout.strip().split('\n')[0]
+    except (FileNotFoundError, Exception):
+        pass
     
     if sys_metrics:
         if len(sys_metrics[0]) == 6:
