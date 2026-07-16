@@ -103,7 +103,8 @@ def test_os_doctor():
     print("\n[OS Doctor Test] Successfully detected CPU spike anomaly!")
  
 def test_focus_os():
-    import torch
+    import pytest
+    torch = pytest.importorskip("torch")
     import os
     from cognios.src.focus_os import WorkloadCNN, Prioritizer
     
