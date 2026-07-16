@@ -267,16 +267,24 @@ with tab_telemetry:
 with tab_doctor:
     st.subheader("AI Anomaly Detection Diagnostics")
     
-    sys_metrics = get_last_system_metrics(limit=100)
+    sys_metrics = get_last_system_metrics(limit=1)
+    model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "os_doctor_model.pkl"))
     
     if sys_metrics:
-        # Train and infer
-        doctor = OSDoctor(contamination='auto', random_state=42)
-        with st.spinner("Analyzing baseline performance history..."):
-            doctor.train()
-            
-        latest_row = sys_metrics[-1]
-        prediction = doctor.infer(latest_row)
+        latest_row = sys_metrics[0]
+        prediction = 1
+        
+        if os.path.exists(model_path):
+            import pickle
+            doctor = OSDoctor(contamination='auto', random_state=42)
+            try:
+                with open(model_path, 'rb') as f:
+                    doctor.model = pickle.load(f)
+                prediction = doctor.infer(latest_row)
+            except Exception as e:
+                st.error(f"Failed to load pre-trained model: {e}")
+        else:
+            st.info("AI Model is currently training in the background. Please wait...")
         
         if prediction == 1:
             st.markdown("""

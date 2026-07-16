@@ -36,9 +36,19 @@ def run_doctor():
     time.sleep(2)  # Give telemetry a moment to write initial data
     doctor = OSDoctor(contamination='auto', random_state=42)
     
+    import pickle
+    model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "os_doctor_model.pkl"))
+    temp_model_path = model_path + ".tmp"
+    
     while True:
         try:
             doctor.train()
+            # Serialize the trained model to disk for UI to consume
+            if doctor.model is not None:
+                with open(temp_model_path, 'wb') as f:
+                    pickle.dump(doctor.model, f)
+                os.replace(temp_model_path, model_path)
+                
             rows = get_last_system_metrics(limit=1)
             if rows:
                 latest = rows[0]
